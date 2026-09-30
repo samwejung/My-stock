@@ -39,15 +39,14 @@ if tickers:
     st.subheader("차트")
     pick = st.selectbox("종목 선택", tickers)
 
-    tv_html = f"""
-    <div style="height:600px;width:100%">
-      <div id="tv_chart" style="height:100%;width:100%"></div>
-    </div>
-    <script src="https://s3.tradingview.com/tv.js"></script>
-    <script>
-      new TradingView.widget({{
-        "autosize": true,
-        "symbol": "{pick}",
+    tv_html = """
+    <div class="tradingview-widget-container" style="height:600px;width:100%">
+      <div class="tradingview-widget-container__widget" style="height:600px;width:100%"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
+      {
+        "width": "100%",
+        "height": "600",
+        "symbol": "__SYM__",
         "interval": "D",
         "timezone": "America/New_York",
         "theme": "light",
@@ -55,12 +54,12 @@ if tickers:
         "locale": "kr",
         "allow_symbol_change": true,
         "hide_side_toolbar": true,
-        "save_image": false,
-        "studies": ["BB@tv-basicstudies"],
-        "container_id": "tv_chart"
-      }});
-    </script>
-    """
-    components.html(tv_html, height=610)
+        "studies": ["STD;Bollinger_Bands"],
+        "support_host": "https://www.tradingview.com"
+      }
+      </script>
+    </div>
+    """.replace("__SYM__", pick)
+    components.html(tv_html, height=620)
 
 st.caption("표: Yahoo Finance / 차트: TradingView (지연 시세일 수 있음)")
