@@ -56,6 +56,7 @@ if tickers:
         "allow_symbol_change": true,
         "hide_side_toolbar": true,
         "save_image": false,
+        "studies": ["BB@tv-basicstudies"],
         "container_id": "tv_chart"
       }});
     </script>
