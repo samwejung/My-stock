@@ -95,7 +95,20 @@ if "scan_df" in st.session_state:
     scan_hits = hits["종목"].tolist()
     st.write(f"분석 {len(df)}개 중 **{len(hits)}개** 해당")
     if len(hits):
-        st.dataframe(hits, hide_index=True, use_container_width=True)
+        st.caption("👆 종목 행을 누르면 아래 차트에 표시됩니다.")
+        event = st.dataframe(
+            hits, hide_index=True, use_container_width=True,
+            on_select="rerun", selection_mode="single-row", key="scan_table",
+        )
+        rows_sel = event.selection.rows
+        if rows_sel:
+            clicked = hits.iloc[rows_sel[0]]["종목"]
+            # 새로 클릭했을 때만 차트 종목을 바꿈 (이후 직접 선택도 가능)
+            if clicked != st.session_state.get("last_clicked"):
+                st.session_state["last_clicked"] = clicked
+                st.session_state["pick"] = clicked
+        else:
+            st.session_state["last_clicked"] = None
     else:
         st.info("조건에 맞는 종목이 없습니다. 근접 범위를 넓혀 보세요.")
     st.caption("'하단 대비'가 0 미만이면 하단선 아래, 0 이상이면 하단선 위에 있다는 뜻입니다.")
@@ -104,7 +117,9 @@ if "scan_df" in st.session_state:
 options = tickers + [s for s in scan_hits if s not in tickers]
 if options:
     st.subheader("차트")
-    pick = st.selectbox("종목 선택 (스캔 결과 포함)", options)
+    if st.session_state.get("pick") not in options:
+        st.session_state.pop("pick", None)
+    pick = st.selectbox("종목 선택 (스캔 결과 포함)", options, key="pick")
 
     tv_html = """
     <div class="tradingview-widget-container" style="height:600px;width:100%">
