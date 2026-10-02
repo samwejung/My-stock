@@ -6,13 +6,28 @@ import pandas as pd
 st.set_page_config(page_title="내 주식", page_icon="📈", layout="centered")
 st.title("📈 내 관심종목")
 
+@st.cache_data(ttl=300)  # 5분 동안 결과 재사용 (요청 횟수 절약)
+def get_history(ticker, period):
+    return yf.Ticker(ticker).history(period=period)
+
+
 # ── 공포·탐욕 지수 (CNN, 비공식 데이터 주소 사용) ──
 @st.cache_data(ttl=600)
 def get_fear_greed():
     import requests
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Origin": "https://edition.cnn.com",
+        "Referer": "https://edition.cnn.com/",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     r = requests.get(
         "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
-        headers={"User-Agent": "Mozilla/5.0"}, timeout=10,
+        headers=headers, timeout=10,
     )
     r.raise_for_status()
     return r.json()["fear_and_greed"]
@@ -37,9 +52,17 @@ try:
     c2.metric("1개월 전", f"{fg['previous_1_month']:.0f}")
     c3.metric("1년 전", f"{fg['previous_1_year']:.0f}")
     st.caption("0에 가까울수록 공포, 100에 가까울수록 탐욕")
-except Exception:
-    st.warning("공포·탐욕 지수를 불러오지 못했습니다. (CNN 쪽에서 접근을 막았을 수 있어요)")
+except Exception as e:
+    st.warning(f"CNN 공포·탐욕 지수를 불러오지 못했습니다. ({type(e).__name__}: {e})")
     st.link_button("CNN에서 직접 보기", "https://edition.cnn.com/markets/fear-and-greed")
+    # 대체 지표: VIX (공포지수) — 높을수록 시장 불안
+    try:
+        vix = get_history("^VIX", "5d")["Close"]
+        st.metric("대신 VIX(변동성 지수)", f"{vix.iloc[-1]:.2f}",
+                  f"{vix.iloc[-1] - vix.iloc[-2]:+.2f} (전일 대비)")
+        st.caption("VIX는 보통 20 아래면 안정, 30 이상이면 불안 구간으로 봅니다.")
+    except Exception:
+        pass
 
 # ── 나스닥 100 종목 (구성 종목은 분기마다 바뀔 수 있으니 필요하면 직접 수정) ──
 NASDAQ100 = [
@@ -59,11 +82,6 @@ NASDAQ100 = [
 # 1. 관심종목 입력 (쉼표로 구분)
 text = st.text_input("관심종목 (쉼표로 구분)", "AAPL, MSFT, NVDA, TSLA")
 tickers = [t.strip().upper() for t in text.split(",") if t.strip()]
-
-
-@st.cache_data(ttl=300)  # 5분 동안 결과 재사용 (요청 횟수 절약)
-def get_history(ticker, period):
-    return yf.Ticker(ticker).history(period=period)
 
 
 # 2. 현재가 / 등락률 표
