@@ -637,6 +637,30 @@ def metrics(eq, entries=None):
     }
 
 
+def trade_chart(price, buys, sells):
+    """종가 라인 위에 매수(▲ 빨강) / 매도(▼ 파랑) 표시. buys/sells: date, price 열을 가진 DataFrame"""
+    import altair as alt
+
+    p = price.copy()
+    p.index = p.index.tz_localize(None) if p.index.tz is not None else p.index
+    line_df = pd.DataFrame({"date": p.index, "price": p.values})
+
+    def prep(df):
+        if df is None or len(df) == 0:
+            return pd.DataFrame({"date": pd.to_datetime([]), "price": []})
+        out = pd.DataFrame({"date": pd.to_datetime(df["date"]), "price": df["price"].astype(float)})
+        return out
+
+    x = alt.X("date:T", title=None)
+    y = alt.Y("price:Q", title=None, scale=alt.Scale(zero=False))
+    base = alt.Chart(line_df).mark_line(color="#9e9e9e", strokeWidth=1.5).encode(x=x, y=y)
+    b = alt.Chart(prep(buys)).mark_point(shape="triangle-up", filled=True, size=110, color="#e53935") \
+        .encode(x=x, y=y, tooltip=[alt.Tooltip("date:T", title="날짜"), alt.Tooltip("price:Q", title="체결가", format=".2f")])
+    sl = alt.Chart(prep(sells)).mark_point(shape="triangle-down", filled=True, size=110, color="#1e88e5") \
+        .encode(x=x, y=y, tooltip=[alt.Tooltip("date:T", title="날짜"), alt.Tooltip("price:Q", title="체결가", format=".2f")])
+    return (base + b + sl).properties(height=280)
+
+
 def backtest():
     st.title("🧪 백테스트")
     st.caption("과거 데이터로 전략을 시험해 보는 도구입니다. 과거 성과가 미래 수익을 보장하지 않습니다.")
@@ -709,6 +733,29 @@ def backtest():
     st.dataframe(res, use_container_width=True)
     st.line_chart(pd.DataFrame({"전략": eq, "단순 보유": hold}), height=260)
     st.caption("시작을 100으로 맞춘 자산 추이입니다. 신호는 종가 확인 후 다음 거래일에 반영했습니다.")
+
+    # 매수·매도 시점 표시
+    px = close.loc[eq.index]
+    if kind == "scale":
+        if len(trades):
+            tdf = trades.assign(date=pd.to_datetime(trades["날짜"]), price=trades["체결가"])
+            buys_df = tdf[tdf["구분"].str.startswith("매수")][["date", "price"]]
+            sells_df = tdf[tdf["구분"] == "매도(익절)"][["date", "price"]]
+        else:
+            buys_df = sells_df = None
+    else:
+        chg = sig.diff()
+        chg.iloc[0] = sig.iloc[0]  # 첫날부터 보유 신호면 첫날 매수로 표시
+        buys_df = pd.DataFrame({"date": px.index[chg.values > 0], "price": px[chg.values > 0].values})
+        sells_df = pd.DataFrame({"date": px.index[chg.values < 0], "price": px[chg.values < 0].values})
+    st.markdown("**📍 매수·매도 시점**")
+    try:
+        st.altair_chart(trade_chart(px, buys_df, sells_df), use_container_width=True)
+        nb = 0 if buys_df is None else len(buys_df)
+        ns_ = 0 if sells_df is None else len(sells_df)
+        st.caption(f"🔺 빨강 = 매수 ({nb}회) · 🔻 파랑 = 매도 ({ns_}회) · 체결가는 해당일 종가")
+    except Exception as e:
+        st.warning(f"매수·매도 차트를 그리지 못했습니다. ({type(e).__name__}: {e})")
 
     if kind == "scale":
         wins = int((trades["구분"] == "매도(익절)").sum()) if len(trades) else 0
