@@ -642,8 +642,25 @@ def backtest():
     st.caption("과거 데이터로 전략을 시험해 보는 도구입니다. 과거 성과가 미래 수익을 보장하지 않습니다.")
 
     section_title("⚙️ 설정")
-    sym = st.text_input("종목", st.session_state.get("bt_sym", "TQQQ")).strip().upper()
-    st.session_state["bt_sym"] = sym
+    # 다른 페이지에 다녀와도 마지막 입력값 유지
+    if "bt_sym" not in st.session_state:
+        st.session_state["bt_sym"] = st.session_state.get("bt_sym_saved", "TQQQ")
+
+    def _pick_ticker():  # 빠른 선택 버튼을 누르면 입력칸 값을 바꿈
+        v = st.session_state.get("bt_pill")
+        if v:
+            st.session_state["bt_sym"] = v
+            st.session_state["bt_pill"] = None
+
+    st.text_input("종목 티커 (직접 입력)", key="bt_sym", placeholder="예: TQQQ, SOXL, NVDA, AAPL")
+    quick = [t.strip().upper() for t in st.session_state.get("saved_tickers", "").split(",") if t.strip()]
+    for t in ("TQQQ", "SOXL", "QQQ", "SPY"):
+        if t not in quick:
+            quick.append(t)
+    if hasattr(st, "pills"):
+        st.pills("빠른 선택", quick, key="bt_pill", on_change=_pick_ticker)
+    sym = st.session_state["bt_sym"].strip().upper()
+    st.session_state["bt_sym_saved"] = sym
     strat_name = st.selectbox("전략", list(STRATEGIES.keys()))
     kind = STRATEGIES[strat_name]
     ma_len = 200
