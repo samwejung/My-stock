@@ -3,8 +3,8 @@ import streamlit.components.v1 as components
 import yfinance as yf
 import pandas as pd
 
-st.set_page_config(page_title="내 주식", page_icon="📈", layout="centered")
-st.title("📈 내 관심종목")
+st.set_page_config(page_title="미국주식 시황", page_icon="📈", layout="centered")
+st.title("📈 미국주식 시황")
 st.markdown(
     "<style>"
     "div[data-testid='stVerticalBlock']{gap:0.6rem;}"
@@ -321,7 +321,11 @@ NASDAQ100 = [
 ]
 
 # 1. 관심종목 입력 (쉼표로 구분)
-text = st.text_input("관심종목 (쉼표로 구분)", "TQQQ, SOXL")
+section_title("⭐ 관심종목 (쉼표로 구분)")
+text = st.text_input(
+    "관심종목", "TQQQ, SOXL", label_visibility="collapsed",
+    placeholder="예: TQQQ, SOXL, NVDA",
+)
 tickers = [t.strip().upper() for t in text.split(",") if t.strip()]
 
 
