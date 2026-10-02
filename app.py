@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 import pandas as pd
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="내 주식", page_icon="📈", layout="centered")
 st.title("📈 내 관심종목")
@@ -47,11 +48,31 @@ try:
         f"{score:.0f} / 100",
         f"{score - fg['previous_close']:+.1f} (전일 대비)",
     )
+    gauge = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score,
+        number={"font": {"size": 44}},
+        gauge={
+            "axis": {"range": [0, 100], "tickvals": [0, 25, 45, 55, 75, 100]},
+            "bar": {"color": "rgba(0,0,0,0)"},  # 막대는 숨기고 바늘(threshold)로 표시
+            "steps": [
+                {"range": [0, 25], "color": "#d32f2f"},
+                {"range": [25, 45], "color": "#f57c00"},
+                {"range": [45, 55], "color": "#fbc02d"},
+                {"range": [55, 75], "color": "#9ccc65"},
+                {"range": [75, 100], "color": "#2e7d32"},
+            ],
+            "threshold": {"line": {"color": "black", "width": 6},
+                          "thickness": 0.9, "value": score},
+        },
+    ))
+    gauge.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=0))
+    st.plotly_chart(gauge, use_container_width=True)
+    st.caption("🔴 극단적 공포 0-25 · 🟠 공포 25-45 · 🟡 중립 45-55 · 🟢 탐욕 55-75 · 🟢 극단적 탐욕 75-100")
     c1, c2, c3 = st.columns(3)
     c1.metric("1주 전", f"{fg['previous_1_week']:.0f}")
     c2.metric("1개월 전", f"{fg['previous_1_month']:.0f}")
     c3.metric("1년 전", f"{fg['previous_1_year']:.0f}")
-    st.caption("0에 가까울수록 공포, 100에 가까울수록 탐욕")
 except Exception as e:
     st.warning(f"CNN 공포·탐욕 지수를 불러오지 못했습니다. ({type(e).__name__}: {e})")
     st.link_button("CNN에서 직접 보기", "https://edition.cnn.com/markets/fear-and-greed")
