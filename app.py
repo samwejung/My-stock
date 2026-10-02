@@ -6,7 +6,10 @@ import pandas as pd
 st.set_page_config(page_title="내 주식", page_icon="📈", layout="centered")
 st.title("📈 내 관심종목")
 st.markdown(
-    "<style>div[data-testid='stVerticalBlock']{gap:0.6rem;}</style>",
+    "<style>"
+    "div[data-testid='stVerticalBlock']{gap:0.6rem;}"
+    "div[data-testid='stVegaLiteChart']{pointer-events:none;}"  # 차트 터치·확대 비활성화
+    "</style>",
     unsafe_allow_html=True,
 )
 
@@ -14,6 +17,13 @@ if st.button("🔄 페이지 전체 새로고침", use_container_width=True):
     st.cache_data.clear()  # 저장된 데이터를 비우고
     # 브라우저 페이지 자체를 다시 불러옴 (차트·스캐너 포함 전부 초기화)
     components.html("<script>window.parent.location.reload();</script>", height=0)
+
+def section_title(text):
+    st.markdown(
+        f'<div style="font-size:1.25rem;font-weight:600;margin:-6px 0 0;">{text}</div>',
+        unsafe_allow_html=True,
+    )
+
 
 @st.cache_data(ttl=300)  # 5분 동안 결과 재사용 (요청 횟수 절약)
 def get_history(ticker, period):
@@ -200,7 +210,7 @@ RATING_KR = {
     "greed": "😀 탐욕", "extreme greed": "🤑 극단적 탐욕",
 }
 
-st.subheader("😨 공포·탐욕 지수 (CNN)")
+section_title("😨 공포·탐욕 지수 (CNN)")
 try:
     fg = get_fear_greed()
     components.html(make_cnn_html(fg), height=330)
@@ -209,10 +219,7 @@ except Exception as e:
     st.link_button("CNN에서 직접 보기", "https://edition.cnn.com/markets/fear-and-greed")
 
 # ── VIX 지수 (공포지수, 변동성) ──
-st.markdown(
-    '<div style="font-size:1.25rem;font-weight:600;margin:-6px 0 0;">📉 VIX 변동성 지수</div>',
-    unsafe_allow_html=True,
-)
+section_title("📉 VIX 변동성 지수")
 try:
     vix_hist = get_history("^VIX", "3mo")["Close"].dropna()
     v_now, v_prev = float(vix_hist.iloc[-1]), float(vix_hist.iloc[-2])
@@ -308,7 +315,7 @@ def scan_bb_lower(symbols):
     return pd.DataFrame(out)
 
 
-st.subheader("🔍 볼린저밴드 하단 스캐너")
+section_title("🔍 볼린저밴드 하단 스캐너")
 st.caption("나스닥 100 · 일봉 · 볼린저밴드(20, 2)")
 near = st.slider(
     "하단 대비 % 기준 (이 값 이하인 종목 표시)", -10.0, 5.0, 1.0, 0.5,
@@ -349,7 +356,7 @@ if "scan_df" in st.session_state:
 # 4. 트레이딩뷰 차트
 options = tickers + [s for s in scan_hits if s not in tickers]
 if options:
-    st.subheader("차트")
+    section_title("📊 차트")
     if st.session_state.get("pick") not in options:
         st.session_state.pop("pick", None)
     pick = st.selectbox("종목 선택 (스캔 결과 포함)", options, key="pick")
