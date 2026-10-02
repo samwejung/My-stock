@@ -118,7 +118,7 @@ NASDAQ100 = [
 ]
 
 # 1. 관심종목 입력 (쉼표로 구분)
-text = st.text_input("관심종목 (쉼표로 구분)", "AAPL, MSFT, NVDA, TSLA")
+text = st.text_input("관심종목 (쉼표로 구분)", "TQQQ, SOXL")
 tickers = [t.strip().upper() for t in text.split(",") if t.strip()]
 
 
