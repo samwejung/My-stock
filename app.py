@@ -2,7 +2,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go
 
 st.set_page_config(page_title="내 주식", page_icon="📈", layout="centered")
 st.title("📈 내 관심종목")
@@ -15,6 +14,75 @@ if st.button("🔄 페이지 전체 새로고침", use_container_width=True):
 @st.cache_data(ttl=300)  # 5분 동안 결과 재사용 (요청 횟수 절약)
 def get_history(ticker, period):
     return yf.Ticker(ticker).history(period=period)
+
+
+import math
+
+
+def make_gauge_html(score):
+    """CNN 스타일 반원 게이지 (SVG)"""
+    cx, cy, r_out, r_in = 200, 190, 150, 88
+    zones = [
+        (0, 25, "극단적 공포", "#d32f2f"),
+        (25, 45, "공포", "#f57c00"),
+        (45, 55, "중립", "#fbc02d"),
+        (55, 75, "탐욕", "#9ccc65"),
+        (75, 100, "극단적 탐욕", "#2e7d32"),
+    ]
+
+    def pt(r, v):
+        th = math.pi * (1 - v / 100)
+        return cx + r * math.cos(th), cy - r * math.sin(th)
+
+    parts, active_name = [], ""
+    for lo, hi, name, color in zones:
+        is_active = lo <= score < hi or (hi == 100 and score >= 100)
+        if is_active:
+            active_name = name
+        x1, y1 = pt(r_out, lo)
+        x2, y2 = pt(r_out, hi)
+        x3, y3 = pt(r_in, hi)
+        x4, y4 = pt(r_in, lo)
+        fill = color if is_active else "#dcdcdc"
+        parts.append(
+            f'<path d="M{x1:.1f},{y1:.1f} A{r_out},{r_out} 0 0 1 {x2:.1f},{y2:.1f} '
+            f'L{x3:.1f},{y3:.1f} A{r_in},{r_in} 0 0 0 {x4:.1f},{y4:.1f} Z" '
+            f'fill="{fill}" stroke="#fff" stroke-width="3"/>'
+        )
+        mid = (lo + hi) / 2
+        lx, ly = pt((r_out + r_in) / 2, mid)
+        rot = 90 - math.degrees(math.pi * (1 - mid / 100))
+        tcolor = "#fff" if is_active else "#555"
+        parts.append(
+            f'<text x="{lx:.1f}" y="{ly:.1f}" transform="rotate({rot:.1f} {lx:.1f} {ly:.1f})" '
+            f'text-anchor="middle" dominant-baseline="central" font-size="10" '
+            f'font-weight="700" fill="{tcolor}">{name}</text>'
+        )
+
+    for v in (0, 25, 50, 75, 100):  # 눈금 숫자
+        tx, ty = pt(r_out + 14, v)
+        parts.append(
+            f'<text x="{tx:.1f}" y="{ty:.1f}" text-anchor="middle" '
+            f'dominant-baseline="central" font-size="11" fill="#888">{v}</text>'
+        )
+
+    nx, ny = pt(135, score)  # 바늘
+    parts.append(
+        f'<line x1="{cx}" y1="{cy}" x2="{nx:.1f}" y2="{ny:.1f}" '
+        f'stroke="#222" stroke-width="4" stroke-linecap="round"/>'
+    )
+    parts.append(
+        f'<circle cx="{cx}" cy="{cy}" r="34" fill="#fff" stroke="#222" stroke-width="3"/>'
+        f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="central" '
+        f'font-size="28" font-weight="800" fill="#222">{score:.0f}</text>'
+        f'<text x="{cx}" y="{cy + 52}" text-anchor="middle" font-size="16" '
+        f'font-weight="700" fill="#222">{active_name}</text>'
+    )
+    svg = f'<svg viewBox="0 0 400 250" width="100%" xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>'
+    return (
+        '<div style="background:#fff;border-radius:12px;padding:4px;'
+        'font-family:-apple-system,Helvetica,Arial,sans-serif;">' + svg + "</div>"
+    )
 
 
 # ── 공포·탐욕 지수 (CNN, 비공식 데이터 주소 사용) ──
@@ -53,27 +121,7 @@ try:
         f"{score:.0f} / 100",
         f"{score - fg['previous_close']:+.1f} (전일 대비)",
     )
-    gauge = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=score,
-        number={"font": {"size": 44}},
-        gauge={
-            "axis": {"range": [0, 100], "tickvals": [0, 25, 45, 55, 75, 100]},
-            "bar": {"color": "rgba(0,0,0,0)"},  # 막대는 숨기고 바늘(threshold)로 표시
-            "steps": [
-                {"range": [0, 25], "color": "#d32f2f"},
-                {"range": [25, 45], "color": "#f57c00"},
-                {"range": [45, 55], "color": "#fbc02d"},
-                {"range": [55, 75], "color": "#9ccc65"},
-                {"range": [75, 100], "color": "#2e7d32"},
-            ],
-            "threshold": {"line": {"color": "black", "width": 6},
-                          "thickness": 0.9, "value": score},
-        },
-    ))
-    gauge.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=0))
-    st.plotly_chart(gauge, use_container_width=True)
-    st.caption("🔴 극단적 공포 0-25 · 🟠 공포 25-45 · 🟡 중립 45-55 · 🟢 탐욕 55-75 · 🟢 극단적 탐욕 75-100")
+    components.html(make_gauge_html(score), height=260)
     def _box(label, v):
         return (
             '<div style="flex:1;text-align:center;padding:8px 4px;'
