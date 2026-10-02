@@ -7,6 +7,11 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="내 주식", page_icon="📈", layout="centered")
 st.title("📈 내 관심종목")
 
+if st.button("🔄 페이지 전체 새로고침", use_container_width=True):
+    st.cache_data.clear()  # 저장된 데이터를 비우고
+    # 브라우저 페이지 자체를 다시 불러옴 (차트·스캐너 포함 전부 초기화)
+    components.html("<script>window.parent.location.reload();</script>", height=0)
+
 @st.cache_data(ttl=300)  # 5분 동안 결과 재사용 (요청 횟수 절약)
 def get_history(ticker, period):
     return yf.Ticker(ticker).history(period=period)
@@ -69,10 +74,22 @@ try:
     gauge.update_layout(height=250, margin=dict(l=20, r=20, t=30, b=0))
     st.plotly_chart(gauge, use_container_width=True)
     st.caption("🔴 극단적 공포 0-25 · 🟠 공포 25-45 · 🟡 중립 45-55 · 🟢 탐욕 55-75 · 🟢 극단적 탐욕 75-100")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("1주 전", f"{fg['previous_1_week']:.0f}")
-    c2.metric("1개월 전", f"{fg['previous_1_month']:.0f}")
-    c3.metric("1년 전", f"{fg['previous_1_year']:.0f}")
+    def _box(label, v):
+        return (
+            '<div style="flex:1;text-align:center;padding:8px 4px;'
+            'border:1px solid rgba(128,128,128,0.3);border-radius:8px;">'
+            f'<div style="font-size:0.8rem;opacity:0.7;">{label}</div>'
+            f'<div style="font-size:1.4rem;font-weight:600;">{v:.0f}</div></div>'
+        )
+
+    st.markdown(
+        '<div style="display:flex;flex-direction:row;gap:8px;">'
+        + _box("1주 전", fg["previous_1_week"])
+        + _box("1개월 전", fg["previous_1_month"])
+        + _box("1년 전", fg["previous_1_year"])
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 except Exception as e:
     st.warning(f"CNN 공포·탐욕 지수를 불러오지 못했습니다. ({type(e).__name__}: {e})")
     st.link_button("CNN에서 직접 보기", "https://edition.cnn.com/markets/fear-and-greed")
