@@ -20,7 +20,7 @@ if st.button("🔄 페이지 전체 새로고침", use_container_width=True):
 
 def section_title(text):
     st.markdown(
-        f'<div style="font-size:1.25rem;font-weight:600;margin:-6px 0 0;">{text}</div>',
+        f'<div style="font-size:1.25rem;font-weight:600;margin:0;">{text}</div>',
         unsafe_allow_html=True,
     )
 
@@ -169,10 +169,16 @@ def make_cnn_html(fg):
         + "</div>"
     )
     fit_js = (
-        "<script>function fit(){var w=document.getElementById('wrap');"
-        "if(!w)return;try{window.frameElement.style.height=(w.offsetHeight+4)+'px';}catch(e){}}"
-        "window.addEventListener('load',fit);window.addEventListener('resize',fit);"
-        "setTimeout(fit,150);setTimeout(fit,600);</script>"
+        "<script>"
+        "function fit(){var w=document.getElementById('wrap');if(!w)return;"
+        "try{window.frameElement.style.height=(w.getBoundingClientRect().height+12)+'px';}catch(e){}}"
+        "function fitLater(){fit();setTimeout(fit,100);setTimeout(fit,400);setTimeout(fit,900);}"
+        "window.addEventListener('load',fitLater);"
+        "window.addEventListener('resize',fitLater);"
+        "window.addEventListener('orientationchange',fitLater);"
+        "if(window.ResizeObserver){new ResizeObserver(fit).observe(document.getElementById('wrap'));}"
+        "fitLater();"
+        "</script>"
     )
     return (
         '<body style="margin:0;">'
