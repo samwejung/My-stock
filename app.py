@@ -534,6 +534,7 @@ STRATEGIES = {
     "200일선 위에서만 보유": "ma",
     "골든크로스 (50일선 > 200일선)": "cross",
     "볼린저 하단 매수 → 중심선 매도": "bb",
+    "볼린저 하단 분할매수 + 평단 익절": "scale",
 }
 
 
@@ -575,6 +576,54 @@ def run_backtest(close, kind, ma_len, cost_pct, years):
     return equity, hold, pos, sig, entries
 
 
+def run_scale_backtest(close, years, below_pct, buy_pct, tp_pct, max_buys, cost_pct, new_only):
+    """볼린저밴드(20, 2) 하단선보다 below_pct% 아래로 내려오면 buy_pct% 매수,
+    평단가 대비 tp_pct% 이상 오르면 전량 매도. 매수는 사이클당 최대 max_buys회.
+    매수·매도 모두 그날 종가로 체결한 것으로 계산하고, 전량 매도하면 새 사이클을 시작한다."""
+    ma = close.rolling(20).mean()
+    sd = close.rolling(20).std(ddof=0)
+    trigger = (ma - 2 * sd) * (1 - below_pct / 100)
+    cond = (close <= trigger) & trigger.notna()
+    if years:
+        keep = close.index >= close.index[-1] - pd.DateOffset(years=years)
+        close, cond = close[keep], cond[keep]
+
+    cost = cost_pct / 100
+    cash, shares, basis, n_buys, base = 100.0, 0.0, 0.0, 0, 0.0
+    prev_cond, eq, trades = False, [], []
+    for date, c, cd in zip(close.index, close.values, cond.values):
+        avg = basis / shares if shares > 0 else 0.0
+        if shares > 0 and c >= avg * (1 + tp_pct / 100):  # 익절: 전량 매도
+            cash += shares * c * (1 - cost)
+            trades.append({"날짜": date.date(), "구분": "매도(익절)", "체결가": round(c, 2),
+                           "평단": round(avg, 2), "수익률(%)": round((c / avg - 1) * 100, 2),
+                           "매수 누적": n_buys})
+            shares, basis, n_buys = 0.0, 0.0, 0
+        elif cd and n_buys < max_buys and not (new_only and prev_cond):
+            if n_buys == 0:
+                base = cash  # 사이클 시작 시점 자산을 기준으로 비중 계산
+            amt = min(base * buy_pct / 100, cash)
+            if amt > 0:
+                sh = amt / (c * (1 + cost))
+                shares += sh
+                basis += sh * c
+                cash -= amt
+                n_buys += 1
+                trades.append({"날짜": date.date(), "구분": f"매수 {n_buys}회", "체결가": round(c, 2),
+                               "평단": round(basis / shares, 2), "수익률(%)": None,
+                               "매수 누적": n_buys})
+        prev_cond = bool(cd)
+        eq.append(cash + shares * c)
+
+    equity = pd.Series(eq, index=close.index)
+    hold = close / close.iloc[0] * 100
+    state = {
+        "shares": shares, "n_buys": n_buys, "last": float(close.iloc[-1]),
+        "avg": basis / shares if shares > 0 else None, "cash": cash,
+    }
+    return equity, hold, pd.DataFrame(trades), state
+
+
 def metrics(eq, entries=None):
     yrs = max((eq.index[-1] - eq.index[0]).days / 365.25, 1e-9)
     total = eq.iloc[-1] / 100 - 1
@@ -600,6 +649,15 @@ def backtest():
     ma_len = 200
     if kind == "ma":
         ma_len = st.slider("이동평균 기간 (일)", 20, 250, 200, 10)
+    sp = {}
+    if kind == "scale":
+        sp["below"] = st.number_input("하단선 이탈폭 (%)", 0.0, 10.0, 1.0, 0.5,
+                                      help="볼린저 하단선보다 이 % 아래로 내려가면 매수 조건 충족")
+        sp["buy_pct"] = st.number_input("1회 매수 비중 (%)", 1.0, 100.0, 20.0, 5.0,
+                                        help="사이클 시작 시점 자산 대비 비율")
+        sp["tp"] = st.number_input("익절 기준 (평단가 대비 %)", 0.5, 50.0, 3.0, 0.5)
+        sp["max_buys"] = st.number_input("최대 매수 횟수", 1, 20, 5, 1)
+        sp["new_only"] = st.checkbox("조건이 새로 충족된 날만 매수 (연속 하락일 중복 매수 제외)", value=False)
     period_label = st.radio("기간", ["3년", "5년", "10년", "전체"], index=1, horizontal=True)
     years = {"3년": 3, "5년": 5, "10년": 10, "전체": 0}[period_label]
     cost = st.number_input("거래 비용 (%, 매수·매도 각각)", 0.0, 2.0, 0.1, 0.05)
@@ -615,7 +673,13 @@ def backtest():
         if len(close) < 300:
             st.warning("데이터가 너무 적어 백테스트하기 어렵습니다.")
             return
-        eq, hold, pos, sig, entries = run_backtest(close, kind, ma_len, cost, years)
+        if kind == "scale":
+            eq, hold, trades, state = run_scale_backtest(
+                close, years, sp["below"], sp["buy_pct"], sp["tp"],
+                int(sp["max_buys"]), cost, sp["new_only"])
+            entries = int(trades["구분"].str.startswith("매수").sum()) if len(trades) else 0
+        else:
+            eq, hold, pos, sig, entries = run_backtest(close, kind, ma_len, cost, years)
     except Exception as e:
         st.error(f"데이터를 불러오지 못했습니다. ({type(e).__name__}: {e})")
         return
@@ -629,8 +693,23 @@ def backtest():
     st.line_chart(pd.DataFrame({"전략": eq, "단순 보유": hold}), height=260)
     st.caption("시작을 100으로 맞춘 자산 추이입니다. 신호는 종가 확인 후 다음 거래일에 반영했습니다.")
 
-    now_sig = "🟢 보유" if sig.iloc[-1] >= 1 else "⚪ 현금"
-    st.markdown(f"**오늘 기준 전략 신호:** {now_sig}")
+    if kind == "scale":
+        wins = int((trades["구분"] == "매도(익절)").sum()) if len(trades) else 0
+        st.markdown(f"**익절 {wins}회 · 매수 {entries}회**")
+        if state["shares"] > 0:
+            gap = (state["last"] / state["avg"] - 1) * 100
+            st.markdown(
+                f"**현재 상태:** 🟢 보유 중 ({state['n_buys']}/{int(sp['max_buys'])}회 매수) · "
+                f"평단 ${state['avg']:.2f} · 현재가 ${state['last']:.2f} ({gap:+.1f}%)"
+            )
+        else:
+            st.markdown("**현재 상태:** ⚪ 현금 대기")
+        if len(trades):
+            with st.expander(f"거래 내역 ({len(trades)}건)"):
+                st.dataframe(trades.iloc[::-1], hide_index=True, use_container_width=True)
+    else:
+        now_sig = "🟢 보유" if sig.iloc[-1] >= 1 else "⚪ 현금"
+        st.markdown(f"**오늘 기준 전략 신호:** {now_sig}")
     st.caption("세금·환율·배당 재투자 방식 등은 반영하지 않은 단순 계산입니다.")
 
 
