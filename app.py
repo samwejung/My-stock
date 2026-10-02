@@ -168,24 +168,12 @@ def make_cnn_html(fg):
         + badge("1년 전", fg["previous_1_year"])
         + "</div>"
     )
-    fit_js = (
-        "<script>"
-        "function fit(){var w=document.getElementById('wrap');if(!w)return;"
-        "try{window.frameElement.style.height=(w.getBoundingClientRect().height+12)+'px';}catch(e){}}"
-        "function fitLater(){fit();setTimeout(fit,100);setTimeout(fit,400);setTimeout(fit,900);}"
-        "window.addEventListener('load',fitLater);"
-        "window.addEventListener('resize',fitLater);"
-        "window.addEventListener('orientationchange',fitLater);"
-        "if(window.ResizeObserver){new ResizeObserver(fit).observe(document.getElementById('wrap'));}"
-        "fitLater();"
-        "</script>"
-    )
     return (
         '<body style="margin:0;">'
         '<div id="wrap" style="background:#fff;border-radius:12px;padding:10px 8px 8px;'
-        'max-width:600px;margin:0 auto;'
+        'max-width:360px;margin:0 auto;'
         'font-family:-apple-system,Helvetica,Arial,sans-serif;">' + svg + row + "</div>"
-        + fit_js + "</body>"
+        + "</body>"
     )
 
 
@@ -219,7 +207,7 @@ RATING_KR = {
 section_title("😨 공포·탐욕 지수 (CNN)")
 try:
     fg = get_fear_greed()
-    components.html(make_cnn_html(fg), height=330)
+    components.html(make_cnn_html(fg), height=318)
 except Exception as e:
     st.warning(f"CNN 공포·탐욕 지수를 불러오지 못했습니다. ({type(e).__name__}: {e})")
     st.link_button("CNN에서 직접 보기", "https://edition.cnn.com/markets/fear-and-greed")
