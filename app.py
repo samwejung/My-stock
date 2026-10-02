@@ -6,6 +6,41 @@ import pandas as pd
 st.set_page_config(page_title="내 주식", page_icon="📈", layout="centered")
 st.title("📈 내 관심종목")
 
+# ── 공포·탐욕 지수 (CNN, 비공식 데이터 주소 사용) ──
+@st.cache_data(ttl=600)
+def get_fear_greed():
+    import requests
+    r = requests.get(
+        "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+        headers={"User-Agent": "Mozilla/5.0"}, timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()["fear_and_greed"]
+
+
+RATING_KR = {
+    "extreme fear": "😱 극단적 공포", "fear": "😨 공포", "neutral": "😐 중립",
+    "greed": "😀 탐욕", "extreme greed": "🤑 극단적 탐욕",
+}
+
+st.subheader("😨 공포·탐욕 지수 (CNN)")
+try:
+    fg = get_fear_greed()
+    score = fg["score"]
+    st.metric(
+        RATING_KR.get(str(fg["rating"]).lower(), fg["rating"]),
+        f"{score:.0f} / 100",
+        f"{score - fg['previous_close']:+.1f} (전일 대비)",
+    )
+    c1, c2, c3 = st.columns(3)
+    c1.metric("1주 전", f"{fg['previous_1_week']:.0f}")
+    c2.metric("1개월 전", f"{fg['previous_1_month']:.0f}")
+    c3.metric("1년 전", f"{fg['previous_1_year']:.0f}")
+    st.caption("0에 가까울수록 공포, 100에 가까울수록 탐욕")
+except Exception:
+    st.warning("공포·탐욕 지수를 불러오지 못했습니다. (CNN 쪽에서 접근을 막았을 수 있어요)")
+    st.link_button("CNN에서 직접 보기", "https://edition.cnn.com/markets/fear-and-greed")
+
 # ── 나스닥 100 종목 (구성 종목은 분기마다 바뀔 수 있으니 필요하면 직접 수정) ──
 NASDAQ100 = [
     "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "TSLA", "AVGO", "COST",
@@ -80,7 +115,10 @@ def scan_bb_lower(symbols):
 
 st.subheader("🔍 볼린저밴드 하단 스캐너")
 st.caption("나스닥 100 · 일봉 · 볼린저밴드(20, 2)")
-near = st.slider("하단선 위 몇 % 이내까지 '근접'으로 볼까요?", 0.0, 5.0, 1.0, 0.5)
+near = st.slider(
+    "하단 대비 % 기준 (이 값 이하인 종목 표시)", -10.0, 5.0, 1.0, 0.5,
+    help="예: 1 → 하단선 위 1% 이내 + 하단 이탈 종목 / 0 → 하단 이탈 종목만 / -3 → 하단선보다 3% 이상 아래인 종목만",
+)
 
 if st.button("스캔 실행"):
     with st.spinner("100개 종목 분석 중... (1분 정도 걸릴 수 있어요)"):
@@ -110,7 +148,7 @@ if "scan_df" in st.session_state:
         else:
             st.session_state["last_clicked"] = None
     else:
-        st.info("조건에 맞는 종목이 없습니다. 근접 범위를 넓혀 보세요.")
+        st.info("조건에 맞는 종목이 없습니다. 기준값을 올려 보세요.")
     st.caption("'하단 대비'가 0 미만이면 하단선 아래, 0 이상이면 하단선 위에 있다는 뜻입니다.")
 
 # 4. 트레이딩뷰 차트
