@@ -195,14 +195,27 @@ try:
 except Exception as e:
     st.warning(f"CNN 공포·탐욕 지수를 불러오지 못했습니다. ({type(e).__name__}: {e})")
     st.link_button("CNN에서 직접 보기", "https://edition.cnn.com/markets/fear-and-greed")
-    # 대체 지표: VIX (공포지수) — 높을수록 시장 불안
-    try:
-        vix = get_history("^VIX", "5d")["Close"]
-        st.metric("대신 VIX(변동성 지수)", f"{vix.iloc[-1]:.2f}",
-                  f"{vix.iloc[-1] - vix.iloc[-2]:+.2f} (전일 대비)")
-        st.caption("VIX는 보통 20 아래면 안정, 30 이상이면 불안 구간으로 봅니다.")
-    except Exception:
-        pass
+
+# ── VIX 지수 (공포지수, 변동성) ──
+st.subheader("📉 VIX 변동성 지수")
+try:
+    vix_hist = get_history("^VIX", "3mo")["Close"].dropna()
+    v_now, v_prev = float(vix_hist.iloc[-1]), float(vix_hist.iloc[-2])
+    if v_now < 15:
+        v_label = "🟢 안정 (낙관 우세)"
+    elif v_now < 20:
+        v_label = "🟡 보통"
+    elif v_now < 30:
+        v_label = "🟠 불안 (변동성 확대)"
+    else:
+        v_label = "🔴 공포 (변동성 급등)"
+    c1, c2 = st.columns(2)
+    c1.metric("VIX", f"{v_now:.2f}", f"{v_now - v_prev:+.2f} (전일 대비)", delta_color="inverse")
+    c2.metric("현재 상태", v_label)
+    st.line_chart(vix_hist, height=160)
+    st.caption("최근 3개월 · VIX가 높을수록 시장 불안이 크다는 뜻입니다. 대략 20 이상이면 불안, 30 이상이면 공포 구간으로 봅니다.")
+except Exception as e:
+    st.warning(f"VIX를 불러오지 못했습니다. ({type(e).__name__}: {e})")
 
 # ── 나스닥 100 종목 (구성 종목은 분기마다 바뀔 수 있으니 필요하면 직접 수정) ──
 NASDAQ100 = [
