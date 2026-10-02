@@ -329,23 +329,86 @@ text = st.text_input(
 tickers = [t.strip().upper() for t in text.split(",") if t.strip()]
 
 
-# 2. 현재가 / 등락률 표
-rows = []
-for t in tickers:
-    try:
-        h = get_history(t, "5d")
-        last = h["Close"].iloc[-1]
-        prev = h["Close"].iloc[-2]
+# 2. 현재가 / 등락률 표 (1분봉 + 프리/애프터마켓 포함, 30초마다 자동 갱신)
+@st.cache_data(ttl=30)
+def get_quote(sym):
+    tk = yf.Ticker(sym)
+    price, ts, prev, err = None, None, None, ""
+    try:  # 가장 최근 1분봉 (프리마켓·애프터마켓 포함)
+        intra = tk.history(period="1d", interval="1m", prepost=True)
+        if intra.empty:
+            intra = tk.history(period="5d", interval="1m", prepost=True)
+        price = float(intra["Close"].dropna().iloc[-1])
+        ts = intra["Close"].dropna().index[-1]
+    except Exception as e:
+        err = f"{type(e).__name__}"
+    try:  # 전일 종가
+        fi = tk.fast_info
+        for k in ("previous_close", "previousClose", "regularMarketPreviousClose"):
+            try:
+                prev = float(fi[k])
+                if prev:
+                    break
+            except Exception:
+                prev = None
+        if price is None:
+            price = float(fi["last_price"])
+    except Exception as e:
+        err = err or f"{type(e).__name__}"
+    if prev is None:  # 마지막 수단: 일봉에서 계산
+        try:
+            d = tk.history(period="5d", interval="1d")["Close"].dropna()
+            prev = float(d.iloc[-2]) if ts is not None and d.index[-1].date() == ts.date() else float(d.iloc[-1])
+        except Exception:
+            pass
+    return {"price": price, "prev": prev, "ts": ts, "err": err}
+
+
+def session_label(ts):
+    if ts is None:
+        return "-"
+    et = ts.tz_convert("America/New_York")
+    now = pd.Timestamp.now(tz="America/New_York")
+    if (now - et).total_seconds() > 20 * 60 or et.weekday() >= 5:
+        return "⚫ 장마감"
+    m = et.hour * 60 + et.minute
+    if 570 <= m < 960:
+        return "🟢 정규장"
+    if 240 <= m < 570:
+        return "🟡 프리마켓"
+    if 960 <= m < 1200:
+        return "🟠 애프터마켓"
+    return "⚫ 장마감"
+
+
+_fragment = st.fragment(run_every=30) if hasattr(st, "fragment") else (lambda f: f)
+
+
+@_fragment
+def watchlist_table(symbols):
+    rows = []
+    for t in symbols:
+        q = get_quote(t)
+        if q["price"] is None:
+            rows.append({"종목": t, "현재가($)": None, "등락률(%)": None,
+                         "상태": f"조회 실패 {q['err']}", "기준시각(KST)": "-"})
+            continue
+        pct = (q["price"] / q["prev"] - 1) * 100 if q["prev"] else None
+        kst = q["ts"].tz_convert("Asia/Seoul").strftime("%m/%d %H:%M") if q["ts"] is not None else "-"
         rows.append({
             "종목": t,
-            "현재가($)": round(last, 2),
-            "등락률(%)": round((last / prev - 1) * 100, 2),
+            "현재가($)": round(q["price"], 2),
+            "등락률(%)": round(pct, 2) if pct is not None else None,
+            "상태": session_label(q["ts"]),
+            "기준시각(KST)": kst,
         })
-    except Exception:
-        rows.append({"종목": t, "현재가($)": None, "등락률(%)": None})
+    if rows:
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.caption("Yahoo Finance 기준 · 30초마다 자동 갱신 · 등락률은 전일 종가 대비 (프리/애프터마켓 가격 포함)")
 
-if rows:
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+if tickers:
+    watchlist_table(tuple(tickers))
 
 
 # 3. 볼린저밴드 하단 스캐너 (나스닥 100, 일봉, 20일/표준편차 2)
@@ -445,4 +508,4 @@ if options:
     """.replace("__SYM__", pick)
     components.html(tv_html, height=620)
 
-st.caption("표·스캐너: Yahoo Finance / 차트: TradingView (지연 시세일 수 있음)")
+st.caption("시세·스캐너: Yahoo Finance / 차트: TradingView (무료 데이터라 최대 약 15분 지연될 수 있음)")
