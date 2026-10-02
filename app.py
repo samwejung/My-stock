@@ -5,6 +5,10 @@ import pandas as pd
 
 st.set_page_config(page_title="내 주식", page_icon="📈", layout="centered")
 st.title("📈 내 관심종목")
+st.markdown(
+    "<style>div[data-testid='stVerticalBlock']{gap:0.6rem;}</style>",
+    unsafe_allow_html=True,
+)
 
 if st.button("🔄 페이지 전체 새로고침", use_container_width=True):
     st.cache_data.clear()  # 저장된 데이터를 비우고
@@ -154,10 +158,18 @@ def make_cnn_html(fg):
         + badge("1년 전", fg["previous_1_year"])
         + "</div>"
     )
+    fit_js = (
+        "<script>function fit(){var w=document.getElementById('wrap');"
+        "if(!w)return;try{window.frameElement.style.height=(w.offsetHeight+4)+'px';}catch(e){}}"
+        "window.addEventListener('load',fit);window.addEventListener('resize',fit);"
+        "setTimeout(fit,150);setTimeout(fit,600);</script>"
+    )
     return (
-        '<div style="background:#fff;border-radius:12px;padding:10px 8px 8px;'
+        '<body style="margin:0;">'
+        '<div id="wrap" style="background:#fff;border-radius:12px;padding:10px 8px 8px;'
         'max-width:600px;margin:0 auto;'
         'font-family:-apple-system,Helvetica,Arial,sans-serif;">' + svg + row + "</div>"
+        + fit_js + "</body>"
     )
 
 
@@ -191,29 +203,41 @@ RATING_KR = {
 st.subheader("😨 공포·탐욕 지수 (CNN)")
 try:
     fg = get_fear_greed()
-    components.html(make_cnn_html(fg), height=470)
+    components.html(make_cnn_html(fg), height=330)
 except Exception as e:
     st.warning(f"CNN 공포·탐욕 지수를 불러오지 못했습니다. ({type(e).__name__}: {e})")
     st.link_button("CNN에서 직접 보기", "https://edition.cnn.com/markets/fear-and-greed")
 
 # ── VIX 지수 (공포지수, 변동성) ──
-st.subheader("📉 VIX 변동성 지수")
+st.markdown(
+    '<div style="font-size:1.25rem;font-weight:600;margin:-6px 0 0;">📉 VIX 변동성 지수</div>',
+    unsafe_allow_html=True,
+)
 try:
     vix_hist = get_history("^VIX", "3mo")["Close"].dropna()
     v_now, v_prev = float(vix_hist.iloc[-1]), float(vix_hist.iloc[-2])
+    diff = v_now - v_prev
     if v_now < 15:
-        v_label = "🟢 안정 (낙관 우세)"
+        v_label = "🟢 안정"
     elif v_now < 20:
         v_label = "🟡 보통"
     elif v_now < 30:
-        v_label = "🟠 불안 (변동성 확대)"
+        v_label = "🟠 불안"
     else:
-        v_label = "🔴 공포 (변동성 급등)"
-    c1, c2 = st.columns(2)
-    c1.metric("VIX", f"{v_now:.2f}", f"{v_now - v_prev:+.2f} (전일 대비)", delta_color="inverse")
-    c2.metric("현재 상태", v_label)
-    st.line_chart(vix_hist, height=160)
-    st.caption("최근 3개월 · VIX가 높을수록 시장 불안이 크다는 뜻입니다. 대략 20 이상이면 불안, 30 이상이면 공포 구간으로 봅니다.")
+        v_label = "🔴 공포"
+    d_color = "#e53935" if diff > 0 else "#2e9e5b"  # VIX 상승=불안(빨강), 하락=안정(초록)
+    arrow = "▲" if diff > 0 else "▼" if diff < 0 else "–"
+    st.markdown(
+        '<div style="display:flex;align-items:baseline;gap:10px;white-space:nowrap;">'
+        f'<span style="font-size:1.35rem;font-weight:700;">{v_now:.2f}</span>'
+        f'<span style="font-size:0.85rem;font-weight:600;color:{d_color};">{arrow} {abs(diff):.2f}</span>'
+        '<span style="font-size:0.85rem;opacity:0.4;">|</span>'
+        f'<span style="font-size:0.9rem;font-weight:600;">{v_label}</span>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.line_chart(vix_hist, height=150)
+    st.caption("최근 3개월 · 15 미만 안정 / 15~20 보통 / 20~30 불안 / 30 이상 공포")
 except Exception as e:
     st.warning(f"VIX를 불러오지 못했습니다. ({type(e).__name__}: {e})")
 
