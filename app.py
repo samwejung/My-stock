@@ -304,7 +304,7 @@ def watchlist_table(symbols):
 def scan_bb_lower(symbols, exclude_partial=True):
     data = yf.download(
         list(symbols), period="6mo", interval="1d",
-        group_by="ticker", auto_adjust=True, progress=False, threads=True,
+        group_by="ticker", auto_adjust=False, progress=False, threads=True,
     )
     now_et = pd.Timestamp.now(tz="America/New_York")
     # 미국 정규장이 끝나기 전(평일 16:15 ET 이전)이면 오늘 봉은 아직 진행 중
@@ -469,6 +469,7 @@ def home():
     if st.button("스캔 실행"):
         with st.spinner("100개 종목 분석 중... (1분 정도 걸릴 수 있어요)"):
             st.session_state["scan_df"] = scan_bb_lower(tuple(NASDAQ100), excl)
+            st.session_state["scan_time"] = pd.Timestamp.now(tz="Asia/Seoul")
 
     scan_hits = []
     if "scan_df" in st.session_state:
@@ -481,6 +482,13 @@ def home():
         hits["상태"] = hits["하단 대비(%)"].apply(lambda x: "하단 이탈" if x < 0 else "근접")
         hits = hits.sort_values("하단 대비(%)")
         scan_hits = hits["종목"].tolist()
+        st_time = st.session_state.get("scan_time")
+        if st_time is not None:
+            age_min = (pd.Timestamp.now(tz="Asia/Seoul") - st_time).total_seconds() / 60
+            st.caption(
+                f"🕒 스캔 시각 {st_time.strftime('%m/%d %H:%M')} (한국시간)"
+                + (" · ⚠️ 오래된 결과입니다. 다시 스캔해 주세요." if age_min > 30 else "")
+            )
         st.write(f"기준일 **{ref_date}** (미국 현지) · 분석 {len(df)}개 중 **{len(hits)}개** 해당")
         if stale or missing:
             st.caption(f"⚠️ 데이터 문제로 제외: 최신일 아님 {stale}개 · 조회 실패 {missing}개 (잠시 후 다시 스캔해 보세요)")
@@ -499,6 +507,26 @@ def home():
                     st.session_state["pick"] = clicked
             else:
                 st.session_state["last_clicked"] = None
+
+            with st.expander("🔎 계산 검증 (최근 6일 종가·하단선)"):
+                chk = st.selectbox("종목", hits["종목"].tolist(), key="chk_sym")
+                try:
+                    hh = yf.Ticker(chk).history(period="6mo", auto_adjust=False)["Close"].dropna()
+                    ma_ = hh.rolling(20).mean()
+                    lo_ = ma_ - 2 * hh.rolling(20).std(ddof=0)
+                    base_day = df.set_index("종목").loc[chk, "기준일"]
+                    detail = pd.DataFrame({
+                        "날짜": [d.strftime("%Y-%m-%d") for d in hh.index],
+                        "종가": hh.round(2).values,
+                        "중심선": ma_.round(2).values,
+                        "하단선": lo_.round(2).values,
+                        "하단 대비(%)": ((hh / lo_ - 1) * 100).round(2).values,
+                    }).tail(6)
+                    detail["스캔 기준"] = ["◀" if d == base_day else "" for d in detail["날짜"]]
+                    st.dataframe(detail.iloc[::-1], hide_index=True, use_container_width=True)
+                    st.caption("트레이딩뷰 볼린저밴드(20, 2)와 같은 계산입니다. '◀'가 스캐너가 사용한 날짜예요.")
+                except Exception as e:
+                    st.warning(f"검증 데이터를 불러오지 못했습니다. ({type(e).__name__})")
         else:
             st.info("조건에 맞는 종목이 없습니다. 기준값을 올려 보세요.")
         st.caption("'하단 대비'가 0 미만이면 하단선 아래, 0 이상이면 하단선 위에 있다는 뜻입니다.")
