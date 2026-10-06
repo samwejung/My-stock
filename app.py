@@ -300,14 +300,41 @@ def watchlist_table(symbols):
 
 
 # 3. 볼린저밴드 하단 스캐너 (나스닥 100, 일봉, 20일/표준편차 2)
-def _bb_row(t, close, exclude_partial):
-    """종가 시리즈 → 스캐너 한 줄. 장중이면 진행 중인 오늘 봉은 제외."""
-    close = close.dropna()
+def _live_info(close_1m):
+    """1분봉 종가 시리즈 → (미국 현지 날짜, 가장 최근 가격)"""
+    s = close_1m.dropna()
+    if s.empty:
+        return None
+    ts = s.index[-1]
+    ts_et = ts.tz_convert("America/New_York") if ts.tzinfo is not None else ts
+    return ts_et.date(), float(s.iloc[-1])
+
+
+def _bb_row(t, close, realtime, live):
+    """종가 시리즈 → 스캐너 한 줄.
+    realtime=False: 마감이 확정된 종가만 사용 (진행 중인 오늘 봉은 제외, 일봉에 빠진 최근 마감일은 1분봉으로 보충)
+    realtime=True : 장중이면 현재가를 오늘 봉으로 사용"""
+    close = close.dropna().copy()
+    if len(close) == 0:
+        return None
+    idx = close.index
+    close.index = (idx.tz_localize(None) if idx.tz is not None else idx).normalize()
     now_et = pd.Timestamp.now(tz="America/New_York")
-    # 미국 정규장이 끝나기 전(평일 16:15 ET 이전)이면 오늘 봉은 아직 진행 중
-    day_in_progress = now_et.weekday() < 5 and (now_et.hour * 60 + now_et.minute) < 16 * 60 + 15
-    if exclude_partial and day_in_progress and len(close) and close.index[-1].date() == now_et.date():
-        close = close.iloc[:-1]  # 확정된 어제 종가 기준
+    minutes = now_et.hour * 60 + now_et.minute
+    day_in_progress = now_et.weekday() < 5 and minutes < 16 * 60 + 15
+
+    if live:
+        d, price = live
+        complete = d < now_et.date() or minutes >= 16 * 60 + 15  # 그 날 장이 끝났는가
+        last_d = close.index[-1].date()
+        if last_d < d:                       # 일봉에 아직 없는 최근 날짜
+            if realtime or complete:
+                close.loc[pd.Timestamp(d)] = price
+        elif last_d == d and realtime:       # 같은 날이면 더 최신 가격으로 교체
+            close.iloc[-1] = price
+    if not realtime and day_in_progress and close.index[-1].date() == now_et.date():
+        close = close.iloc[:-1]              # 진행 중인 오늘 봉 제외
+
     if len(close) < 20:
         return None
     ma = close.rolling(20).mean()
@@ -323,27 +350,42 @@ def _bb_row(t, close, exclude_partial):
     }
 
 
-@st.cache_data(ttl=600)  # 10분 캐시
-def scan_bb_lower(symbols, exclude_partial=True):
-    # 1단계: 100개 종목을 한 번에 받아 후보를 추림
+@st.cache_data(ttl=120)  # 2분 캐시
+def scan_bb_lower(symbols, realtime=False):
+    # 1단계: 100개 종목의 일봉 + 1분봉(최신가)을 한 번에 받아 후보를 추림
     data = yf.download(
         list(symbols), period="6mo", interval="1d",
         group_by="ticker", auto_adjust=False, progress=False, threads=True,
     )
+    lives = {}
+    try:
+        intra = yf.download(
+            list(symbols), period="1d", interval="1m",
+            group_by="ticker", auto_adjust=False, progress=False, threads=True,
+        )
+        for t in symbols:
+            try:
+                lives[t] = _live_info(intra[t]["Close"])
+            except Exception:
+                pass
+    except Exception:
+        pass
     out = []
     for t in symbols:
         try:
-            row = _bb_row(t, data[t]["Close"], exclude_partial)
+            row = _bb_row(t, data[t]["Close"], realtime, lives.get(t))
             if row:
                 out.append(row)
         except Exception:
             continue
-    # 2단계: 후보(하단선 위 6% 이내)는 종목별로 다시 받아 값을 확정 (일괄 다운로드 오차 방지)
+    # 2단계: 후보(하단선 위 6% 이내)는 종목별로 다시 받아 값을 확정
     for i, row in enumerate(out):
         if row["하단 대비(%)"] <= 6:
             try:
-                h = yf.Ticker(row["종목"]).history(period="6mo", interval="1d", auto_adjust=False)
-                fixed = _bb_row(row["종목"], h["Close"], exclude_partial)
+                tk = yf.Ticker(row["종목"])
+                h = tk.history(period="6mo", interval="1d", auto_adjust=False)
+                live = _live_info(tk.history(period="1d", interval="1m")["Close"])
+                fixed = _bb_row(row["종목"], h["Close"], realtime, live)
                 if fixed:
                     out[i] = fixed
             except Exception:
@@ -480,14 +522,17 @@ def home():
 
     st.session_state["saved_near"] = near
 
-    excl = st.checkbox(
-        "장중 미완성 봉 제외 (확정된 종가 기준)", value=True,
-        help="미국 장 진행 중에는 오늘 봉이 아직 완성되지 않았습니다. 켜면 가장 최근에 마감된 날(어제) 종가로 계산합니다.",
+    mode = st.radio(
+        "가격 기준", ["확정 종가", "실시간 현재가 포함"], horizontal=True,
+        help="확정 종가: 마감이 끝난 가장 최근 날 종가로 계산합니다. "
+             "실시간: 장중이면 지금 가격을 오늘 봉으로 사용해 계산합니다.",
     )
+    realtime = mode == "실시간 현재가 포함"
     if st.button("스캔 실행"):
         with st.spinner("100개 종목 분석 중... (1분 정도 걸릴 수 있어요)"):
-            st.session_state["scan_df"] = scan_bb_lower(tuple(NASDAQ100), excl)
+            st.session_state["scan_df"] = scan_bb_lower(tuple(NASDAQ100), realtime)
             st.session_state["scan_time"] = pd.Timestamp.now(tz="Asia/Seoul")
+            st.session_state["scan_mode"] = mode
 
     scan_hits = []
     if "scan_df" in st.session_state:
@@ -504,7 +549,7 @@ def home():
         if st_time is not None:
             age_min = (pd.Timestamp.now(tz="Asia/Seoul") - st_time).total_seconds() / 60
             st.caption(
-                f"🕒 스캔 시각 {st_time.strftime('%m/%d %H:%M')} (한국시간)"
+                f"🕒 스캔 시각 {st_time.strftime('%m/%d %H:%M')} (한국시간) · {st.session_state.get('scan_mode', '')}"
                 + (" · ⚠️ 오래된 결과입니다. 다시 스캔해 주세요." if age_min > 30 else "")
             )
         st.write(f"기준일 **{ref_date}** (미국 현지) · 분석 {len(df)}개 중 **{len(hits)}개** 해당")
