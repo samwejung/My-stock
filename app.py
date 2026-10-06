@@ -300,36 +300,54 @@ def watchlist_table(symbols):
 
 
 # 3. 볼린저밴드 하단 스캐너 (나스닥 100, 일봉, 20일/표준편차 2)
+def _bb_row(t, close, exclude_partial):
+    """종가 시리즈 → 스캐너 한 줄. 장중이면 진행 중인 오늘 봉은 제외."""
+    close = close.dropna()
+    now_et = pd.Timestamp.now(tz="America/New_York")
+    # 미국 정규장이 끝나기 전(평일 16:15 ET 이전)이면 오늘 봉은 아직 진행 중
+    day_in_progress = now_et.weekday() < 5 and (now_et.hour * 60 + now_et.minute) < 16 * 60 + 15
+    if exclude_partial and day_in_progress and len(close) and close.index[-1].date() == now_et.date():
+        close = close.iloc[:-1]  # 확정된 어제 종가 기준
+    if len(close) < 20:
+        return None
+    ma = close.rolling(20).mean()
+    sd = close.rolling(20).std(ddof=0)  # 트레이딩뷰와 같은 방식
+    lower = (ma - 2 * sd).iloc[-1]
+    last = close.iloc[-1]
+    return {
+        "종목": t,
+        "종가($)": round(float(last), 2),
+        "하단선($)": round(float(lower), 2),
+        "하단 대비(%)": round(float((last / lower - 1) * 100), 2),
+        "기준일": str(close.index[-1].date()),
+    }
+
+
 @st.cache_data(ttl=600)  # 10분 캐시
 def scan_bb_lower(symbols, exclude_partial=True):
+    # 1단계: 100개 종목을 한 번에 받아 후보를 추림
     data = yf.download(
         list(symbols), period="6mo", interval="1d",
         group_by="ticker", auto_adjust=False, progress=False, threads=True,
     )
-    now_et = pd.Timestamp.now(tz="America/New_York")
-    # 미국 정규장이 끝나기 전(평일 16:15 ET 이전)이면 오늘 봉은 아직 진행 중
-    day_in_progress = now_et.weekday() < 5 and (now_et.hour * 60 + now_et.minute) < 16 * 60 + 15
     out = []
     for t in symbols:
         try:
-            close = data[t]["Close"].dropna()
-            if exclude_partial and day_in_progress and len(close) and close.index[-1].date() == now_et.date():
-                close = close.iloc[:-1]  # 진행 중인 오늘 봉 제외 → 확정된 어제 종가 기준
-            if len(close) < 20:
-                continue
-            ma = close.rolling(20).mean()
-            sd = close.rolling(20).std(ddof=0)  # 트레이딩뷰와 같은 방식
-            lower = (ma - 2 * sd).iloc[-1]
-            last = close.iloc[-1]
-            out.append({
-                "종목": t,
-                "종가($)": round(last, 2),
-                "하단선($)": round(lower, 2),
-                "하단 대비(%)": round((last / lower - 1) * 100, 2),
-                "기준일": str(close.index[-1].date()),
-            })
+            row = _bb_row(t, data[t]["Close"], exclude_partial)
+            if row:
+                out.append(row)
         except Exception:
             continue
+    # 2단계: 후보(하단선 위 6% 이내)는 종목별로 다시 받아 값을 확정 (일괄 다운로드 오차 방지)
+    for i, row in enumerate(out):
+        if row["하단 대비(%)"] <= 6:
+            try:
+                h = yf.Ticker(row["종목"]).history(period="6mo", interval="1d", auto_adjust=False)
+                fixed = _bb_row(row["종목"], h["Close"], exclude_partial)
+                if fixed:
+                    out[i] = fixed
+            except Exception:
+                pass
     return pd.DataFrame(out)
 
 
@@ -511,13 +529,17 @@ def home():
             with st.expander("🔎 계산 검증 (최근 6일 종가·하단선)"):
                 chk = st.selectbox("종목", hits["종목"].tolist(), key="chk_sym")
                 try:
-                    hh = yf.Ticker(chk).history(period="6mo", auto_adjust=False)["Close"].dropna()
+                    full_h = yf.Ticker(chk).history(period="6mo", auto_adjust=False).dropna(subset=["Close"])
+                    hh = full_h["Close"]
                     ma_ = hh.rolling(20).mean()
                     lo_ = ma_ - 2 * hh.rolling(20).std(ddof=0)
                     base_day = df.set_index("종목").loc[chk, "기준일"]
                     detail = pd.DataFrame({
                         "날짜": [d.strftime("%Y-%m-%d") for d in hh.index],
                         "종가": hh.round(2).values,
+                        "고가": full_h["High"].round(2).values,
+                        "저가": full_h["Low"].round(2).values,
+                        "거래량(만)": (full_h["Volume"] / 10000).round(0).values,
                         "중심선": ma_.round(2).values,
                         "하단선": lo_.round(2).values,
                         "하단 대비(%)": ((hh / lo_ - 1) * 100).round(2).values,
