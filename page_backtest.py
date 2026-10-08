@@ -44,8 +44,8 @@ def backtest():
                                    help="장중 고가가 평단가 대비 이 % 이상에 닿으면 목표가에 매도 (종가 기준 아님)")
         sp["max_buys"] = st.number_input("최대 매수 횟수", 1, 20, 5, 1)
         sp["new_only"] = st.checkbox("조건이 새로 충족된 날만 매수 (연속 하락일 중복 매수 제외)", value=False)
-    period_label = st.radio("기간", ["3년", "5년", "10년", "전체"], index=1, horizontal=True)
-    years = {"3년": 3, "5년": 5, "10년": 10, "전체": 0}[period_label]
+    period_label = st.radio("기간", ["3개월", "6개월", "1년", "3년", "전체"], index=3, horizontal=True)
+    months = {"3개월": 3, "6개월": 6, "1년": 12, "3년": 36, "전체": 0}[period_label]
     cost = st.number_input("거래 비용 (%, 매수·매도 각각)", 0.0, 2.0, 0.1, 0.05)
 
     if not st.button("▶ 백테스트 실행", use_container_width=True):
@@ -62,11 +62,11 @@ def backtest():
             return
         if kind == "scale":
             eq, hold, trades, state = run_scale_backtest(
-                ohlc, years, sp["below"], sp["buy_pct"], sp["tp"],
+                ohlc, months, sp["below"], sp["buy_pct"], sp["tp"],
                 int(sp["max_buys"]), cost, sp["new_only"])
             entries = int(trades["구분"].str.startswith("매수").sum()) if len(trades) else 0
         else:
-            eq, hold, pos, sig, entries = run_backtest(close, kind, ma_len, cost, years)
+            eq, hold, pos, sig, entries = run_backtest(close, kind, ma_len, cost, months)
     except Exception as e:
         st.error(f"데이터를 불러오지 못했습니다. ({type(e).__name__}: {e})")
         return
