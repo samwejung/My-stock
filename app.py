@@ -220,85 +220,6 @@ NASDAQ100 = [
     "MSTR", "DLTR",
 ]
 
-# 2. 현재가 / 등락률 표 (1분봉 + 프리/애프터마켓 포함, 30초마다 자동 갱신)
-@st.cache_data(ttl=30)
-def get_quote(sym):
-    tk = yf.Ticker(sym)
-    price, ts, prev, err = None, None, None, ""
-    try:  # 가장 최근 1분봉 (프리마켓·애프터마켓 포함)
-        intra = tk.history(period="1d", interval="1m", prepost=True)
-        if intra.empty:
-            intra = tk.history(period="5d", interval="1m", prepost=True)
-        price = float(intra["Close"].dropna().iloc[-1])
-        ts = intra["Close"].dropna().index[-1]
-    except Exception as e:
-        err = f"{type(e).__name__}"
-    try:  # 전일 종가
-        fi = tk.fast_info
-        for k in ("previous_close", "previousClose", "regularMarketPreviousClose"):
-            try:
-                prev = float(fi[k])
-                if prev:
-                    break
-            except Exception:
-                prev = None
-        if price is None:
-            price = float(fi["last_price"])
-    except Exception as e:
-        err = err or f"{type(e).__name__}"
-    if prev is None:  # 마지막 수단: 일봉에서 계산
-        try:
-            d = tk.history(period="5d", interval="1d")["Close"].dropna()
-            prev = float(d.iloc[-2]) if ts is not None and d.index[-1].date() == ts.date() else float(d.iloc[-1])
-        except Exception:
-            pass
-    return {"price": price, "prev": prev, "ts": ts, "err": err}
-
-
-def session_label(ts):
-    if ts is None:
-        return "-"
-    et = ts.tz_convert("America/New_York")
-    now = pd.Timestamp.now(tz="America/New_York")
-    if (now - et).total_seconds() > 20 * 60 or et.weekday() >= 5:
-        return "⚫ 장마감"
-    m = et.hour * 60 + et.minute
-    if 570 <= m < 960:
-        return "🟢 정규장"
-    if 240 <= m < 570:
-        return "🟡 프리마켓"
-    if 960 <= m < 1200:
-        return "🟠 애프터마켓"
-    return "⚫ 장마감"
-
-
-_fragment = st.fragment(run_every=30) if hasattr(st, "fragment") else (lambda f: f)
-
-
-@_fragment
-def watchlist_table(symbols):
-    rows = []
-    for t in symbols:
-        q = get_quote(t)
-        if q["price"] is None:
-            rows.append({"종목": t, "현재가($)": None, "등락률(%)": None,
-                         "상태": f"조회 실패 {q['err']}", "기준시각(KST)": "-"})
-            continue
-        pct = (q["price"] / q["prev"] - 1) * 100 if q["prev"] else None
-        kst = q["ts"].tz_convert("Asia/Seoul").strftime("%m/%d %H:%M") if q["ts"] is not None else "-"
-        rows.append({
-            "종목": t,
-            "현재가($)": round(q["price"], 2),
-            "등락률(%)": round(pct, 2) if pct is not None else None,
-            "상태": session_label(q["ts"]),
-            "기준시각(KST)": kst,
-        })
-    if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-    st.caption("Yahoo Finance 기준 · 30초마다 자동 갱신 · 등락률은 전일 종가 대비 (프리/애프터마켓 가격 포함)")
-
-
-
 # 3. 볼린저밴드 하단 스캐너 (나스닥 100, 일봉, 20일/표준편차 2)
 def _live_info(close_1m):
     """1분봉 종가 시리즈 → (미국 현지 날짜, 가장 최근 가격)"""
@@ -498,21 +419,11 @@ def home():
     st.markdown("".join(market_html), unsafe_allow_html=True)
     st.caption("200일선 위: 상승 추세 / 아래: 하락 추세로 보는 대표적 기준입니다. (상승 빨강, 하락 파랑)")
 
-    # 1. 관심종목 입력 (쉼표로 구분)
-    section_title("⭐ 관심종목 (쉼표로 구분)")
-    text = st.text_input(
-        "관심종목", st.session_state.get("saved_tickers", "TQQQ, SOXL"),
-        label_visibility="collapsed", placeholder="예: TQQQ, SOXL, NVDA",
-    )
-    st.session_state["saved_tickers"] = text
-    tickers = [t.strip().upper() for t in text.split(",") if t.strip()]
+    st.caption("시세: Yahoo Finance · 공포·탐욕 지수: CNN (무료 데이터라 최대 약 15분 지연될 수 있음)")
 
 
-    if tickers:
-        watchlist_table(tuple(tickers))
-
-
-    section_title("🔍 볼린저밴드 하단 스캐너")
+def scanner():
+    st.title("🔍 볼린저밴드 스캐너")
     st.caption("나스닥 100 · 일봉 · 볼린저밴드(20, 2)")
     near = st.slider(
         "하단 대비 % 기준 (이 값 이하인 종목 표시)", -10.0, 5.0,
@@ -599,12 +510,12 @@ def home():
         st.caption("'하단 대비'가 0 미만이면 하단선 아래, 0 이상이면 하단선 위에 있다는 뜻입니다.")
 
     # 4. 트레이딩뷰 차트
-    options = tickers + [s for s in scan_hits if s not in tickers]
+    options = list(scan_hits)
     if options:
         section_title("📊 차트")
         if st.session_state.get("pick") not in options:
             st.session_state.pop("pick", None)
-        pick = st.selectbox("종목 선택 (스캔 결과 포함)", options, key="pick")
+        pick = st.selectbox("종목 선택 (스캔 결과)", options, key="pick")
 
         tv_html = """
         <div class="tradingview-widget-container" style="height:600px;width:100%">
@@ -628,9 +539,10 @@ def home():
         </div>
         """.replace("__SYM__", pick)
         components.html(tv_html, height=620)
+    else:
+        st.caption("스캔을 실행하면 결과 종목의 차트를 이 아래에서 볼 수 있습니다.")
 
     st.caption("시세·스캐너: Yahoo Finance / 차트: TradingView (무료 데이터라 최대 약 15분 지연될 수 있음)")
-
 
 
 # ════════════════════════════════════════════════
@@ -788,10 +700,7 @@ def backtest():
             st.session_state["bt_pill"] = None
 
     st.text_input("종목 티커 (직접 입력)", key="bt_sym", placeholder="예: TQQQ, SOXL, NVDA, AAPL")
-    quick = [t.strip().upper() for t in st.session_state.get("saved_tickers", "").split(",") if t.strip()]
-    for t in ("TQQQ", "SOXL", "QQQ", "SPY"):
-        if t not in quick:
-            quick.append(t)
+    quick = ["TQQQ", "SOXL", "QQQ", "SPY", "NVDA", "AAPL"]
     if hasattr(st, "pills"):
         st.pills("빠른 선택", quick, key="bt_pill", on_change=_pick_ticker)
     sym = st.session_state["bt_sym"].strip().upper()
@@ -893,6 +802,7 @@ def backtest():
 # ════════════════════════════════════════════════
 pages = [
     st.Page(home, title="시황", icon="📈", url_path="market", default=True),
+    st.Page(scanner, title="스캐너", icon="🔍", url_path="scanner"),
     st.Page(backtest, title="백테스트", icon="🧪", url_path="backtest"),
 ]
 try:
