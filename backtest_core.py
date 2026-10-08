@@ -38,13 +38,13 @@ def make_signal(close, kind, ma_len):
     return pd.Series(out, index=close.index)
 
 
-def run_backtest(close, kind, ma_len, cost_pct, years):
+def run_backtest(close, kind, ma_len, cost_pct, months):
     """신호는 종가에 확인하고 다음 거래일부터 반영 (미래 데이터 사용 방지)"""
     sig = make_signal(close, kind, ma_len)
     pos = sig.shift(1).fillna(0.0)
     ret = close.pct_change().fillna(0.0)
-    if years:
-        cutoff = close.index[-1] - pd.DateOffset(years=years)
+    if months:
+        cutoff = close.index[-1] - pd.DateOffset(months=months)
         keep = close.index >= cutoff
         pos, ret, sig = pos[keep], ret[keep], sig[keep]
     turn = pos.diff().abs().fillna(pos.abs())
@@ -62,7 +62,7 @@ def load_ohlc(sym):
     return h[["Open", "High", "Low", "Close"]].dropna()
 
 
-def run_scale_backtest(ohlc, years, below_pct, buy_pct, tp_pct, max_buys, cost_pct, new_only):
+def run_scale_backtest(ohlc, months, below_pct, buy_pct, tp_pct, max_buys, cost_pct, new_only):
     """볼린저밴드(20, 2) 하단선보다 below_pct% 아래에서 종가가 마감하면 buy_pct% 매수 (종가 체결).
     보유 중 장중 고가가 평단가 대비 tp_pct%에 도달하면 전량 매도 (목표가 체결, 시가가 이미 목표가
     이상이면 시가 체결). 매수는 사이클당 최대 max_buys회이고, 전량 매도하면 새 사이클을 시작한다.
@@ -72,8 +72,8 @@ def run_scale_backtest(ohlc, years, below_pct, buy_pct, tp_pct, max_buys, cost_p
     sd = close.rolling(20).std(ddof=0)
     trigger = (ma - 2 * sd) * (1 - below_pct / 100)
     cond = (close <= trigger) & trigger.notna()
-    if years:
-        keep = close.index >= close.index[-1] - pd.DateOffset(years=years)
+    if months:
+        keep = close.index >= close.index[-1] - pd.DateOffset(months=months)
         ohlc, close, cond = ohlc[keep], close[keep], cond[keep]
 
     cost = cost_pct / 100
@@ -122,7 +122,7 @@ def metrics(eq, entries=None):
     mdd = (eq / eq.cummax() - 1).min()
     return {
         "총수익률": f"{total * 100:+.1f}%",
-        "연평균(CAGR)": f"{cagr * 100:+.1f}%",
+        "연평균(CAGR)": f"{cagr * 100:+.1f}%" if yrs >= 0.98 else "-",  # 1년 미만은 연환산이 왜곡되어 생략
         "최대낙폭(MDD)": f"{mdd * 100:.1f}%",
         "매수 횟수": "-" if entries is None else f"{entries}회",
     }
