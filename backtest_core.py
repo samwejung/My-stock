@@ -55,27 +55,39 @@ def run_backtest(close, kind, ma_len, cost_pct, years):
     return equity, hold, pos, sig, entries
 
 
-def run_scale_backtest(close, years, below_pct, buy_pct, tp_pct, max_buys, cost_pct, new_only):
-    """볼린저밴드(20, 2) 하단선보다 below_pct% 아래로 내려오면 buy_pct% 매수,
-    평단가 대비 tp_pct% 이상 오르면 전량 매도. 매수는 사이클당 최대 max_buys회.
-    매수·매도 모두 그날 종가로 체결한 것으로 계산하고, 전량 매도하면 새 사이클을 시작한다."""
+@st.cache_data(ttl=3600)
+def load_ohlc(sym):
+    """시가·고가·저가·종가 (장중 고가 도달 여부 판단용)"""
+    h = yf.Ticker(sym).history(period="max", auto_adjust=True)
+    return h[["Open", "High", "Low", "Close"]].dropna()
+
+
+def run_scale_backtest(ohlc, years, below_pct, buy_pct, tp_pct, max_buys, cost_pct, new_only):
+    """볼린저밴드(20, 2) 하단선보다 below_pct% 아래에서 종가가 마감하면 buy_pct% 매수 (종가 체결).
+    보유 중 장중 고가가 평단가 대비 tp_pct%에 도달하면 전량 매도 (목표가 체결, 시가가 이미 목표가
+    이상이면 시가 체결). 매수는 사이클당 최대 max_buys회이고, 전량 매도하면 새 사이클을 시작한다.
+    매수는 장 마감 후 종가에 이뤄지므로, 매수한 당일의 고가로는 매도하지 않는다."""
+    close = ohlc["Close"]
     ma = close.rolling(20).mean()
     sd = close.rolling(20).std(ddof=0)
     trigger = (ma - 2 * sd) * (1 - below_pct / 100)
     cond = (close <= trigger) & trigger.notna()
     if years:
         keep = close.index >= close.index[-1] - pd.DateOffset(years=years)
-        close, cond = close[keep], cond[keep]
+        ohlc, close, cond = ohlc[keep], close[keep], cond[keep]
 
     cost = cost_pct / 100
     cash, shares, basis, n_buys, base = 100.0, 0.0, 0.0, 0, 0.0
     prev_cond, eq, trades = False, [], []
-    for date, c, cd in zip(close.index, close.values, cond.values):
+    for date, o, h, c, cd in zip(close.index, ohlc["Open"].values, ohlc["High"].values,
+                                 close.values, cond.values):
         avg = basis / shares if shares > 0 else 0.0
-        if shares > 0 and c >= avg * (1 + tp_pct / 100):  # 익절: 전량 매도
-            cash += shares * c * (1 - cost)
-            trades.append({"날짜": date.date(), "구분": "매도(익절)", "체결가": round(c, 2),
-                           "평단": round(avg, 2), "수익률(%)": round((c / avg - 1) * 100, 2),
+        target = avg * (1 + tp_pct / 100)
+        if shares > 0 and h >= target:  # 익절: 장중 고가가 목표가에 닿으면 전량 매도
+            fill = o if o >= target else target  # 갭 상승으로 시가가 목표가 위면 시가 체결
+            cash += shares * fill * (1 - cost)
+            trades.append({"날짜": date.date(), "구분": "매도(익절)", "체결가": round(fill, 2),
+                           "평단": round(avg, 2), "수익률(%)": round((fill / avg - 1) * 100, 2),
                            "매수 누적": n_buys})
             shares, basis, n_buys = 0.0, 0.0, 0
         elif cd and n_buys < max_buys and not (new_only and prev_cond):
