@@ -4,7 +4,7 @@ import pandas as pd
 
 from common import section_title
 from backtest_core import (
-    STRATEGIES, load_prices, run_backtest, run_scale_backtest, metrics, trade_chart,
+    STRATEGIES, load_prices, load_ohlc, run_backtest, run_scale_backtest, metrics, trade_chart,
 )
 
 
@@ -40,7 +40,8 @@ def backtest():
                                       help="볼린저 하단선보다 이 % 아래로 내려가면 매수 조건 충족")
         sp["buy_pct"] = st.number_input("1회 매수 비중 (%)", 1.0, 100.0, 20.0, 5.0,
                                         help="사이클 시작 시점 자산 대비 비율")
-        sp["tp"] = st.number_input("익절 기준 (평단가 대비 %)", 0.5, 50.0, 3.0, 0.5)
+        sp["tp"] = st.number_input("익절 목표 (평단가 대비 %)", 0.5, 50.0, 3.5, 0.5,
+                                   help="장중 고가가 평단가 대비 이 % 이상에 닿으면 목표가에 매도 (종가 기준 아님)")
         sp["max_buys"] = st.number_input("최대 매수 횟수", 1, 20, 5, 1)
         sp["new_only"] = st.checkbox("조건이 새로 충족된 날만 매수 (연속 하락일 중복 매수 제외)", value=False)
     period_label = st.radio("기간", ["3년", "5년", "10년", "전체"], index=1, horizontal=True)
@@ -54,13 +55,14 @@ def backtest():
         st.warning("종목을 입력해 주세요.")
         return
     try:
-        close = load_prices(sym)
+        ohlc = load_ohlc(sym) if kind == "scale" else None
+        close = ohlc["Close"] if kind == "scale" else load_prices(sym)
         if len(close) < 300:
             st.warning("데이터가 너무 적어 백테스트하기 어렵습니다.")
             return
         if kind == "scale":
             eq, hold, trades, state = run_scale_backtest(
-                close, years, sp["below"], sp["buy_pct"], sp["tp"],
+                ohlc, years, sp["below"], sp["buy_pct"], sp["tp"],
                 int(sp["max_buys"]), cost, sp["new_only"])
             entries = int(trades["구분"].str.startswith("매수").sum()) if len(trades) else 0
         else:
@@ -97,7 +99,8 @@ def backtest():
         st.altair_chart(trade_chart(px, buys_df, sells_df), use_container_width=True)
         nb = 0 if buys_df is None else len(buys_df)
         ns_ = 0 if sells_df is None else len(sells_df)
-        st.caption(f"🔺 빨강 = 매수 ({nb}회) · 🔻 파랑 = 매도 ({ns_}회) · 체결가는 해당일 종가")
+        st.caption(f"🔺 빨강 = 매수 ({nb}회) · 🔻 파랑 = 매도 ({ns_}회) · "
+                   + ("매수는 종가, 매도는 장중 목표가에 체결" if kind == "scale" else "체결가는 해당일 종가"))
     except Exception as e:
         st.warning(f"매수·매도 차트를 그리지 못했습니다. ({type(e).__name__}: {e})")
 
